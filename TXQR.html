@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>txqr 離線圖檔傳輸工具 (發送/接收雙向)</title>
+  <!-- 引入開源庫: QR Code 產生器 & jsQR 影像解碼器 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #111827;
+      color: #f3f4f6;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 16px;
+    }
+    .app-card {
+      background: #1f2937;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+      width: 100%;
+      max-width: 420px;
+      overflow: hidden;
+    }
+    /* 頁籤切換樣式 */
+    .nav-tabs {
+      display: flex;
+      background: #111827;
+      border-bottom: 1px solid #374151;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 14px;
+      background: none;
+      border: none;
+      color: #9ca3af;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      color: #3b82f6;
+      border-bottom: 3px solid #3b82f6;
+      background: #1f2937;
+    }
+    /* 內容分頁控制 */
+    .tab-content {
+      padding: 20px;
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    /* 發送器相關樣式 */
+    .form-group {
+      margin-bottom: 14px;
+      text-align: left;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+    input[type="file"], input[type="number"] {
+      width: 100%;
+      padding: 8px 12px;
+      background: #374151;
+      border: 1px solid #4b5563;
+      border-radius: 6px;
+      color: #fff;
+    }
+    .qr-box {
+      width: 280px;
+      height: 280px;
+      margin: 16px auto;
+      border: 2px dashed #3b82f6;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #111827;
+      overflow: hidden;
+    }
+    .qr-box img { width: 100%; height: 100%; object-fit: contain; }
+    /* 接收器相關樣式 */
+    #video-container {
+      position: relative;
+      width: 100%;
+      height: 250px;
+      border: 2px solid #10b981;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+    }
+    video { width: 100%; height: 100%; object-fit: cover; }
+    .progress-bg {
+      width: 100%;
+      height: 10px;
+      background: #374151;
+      border-radius: 5px;
+      margin-top: 14px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: #10b981;
+      transition: width 0.1s;
+    }
+    .status-text {
+      font-family: monospace;
+      font-size: 0.85rem;
+      color: #60a5fa;
+      margin-top: 8px;
+      text-align: center;
+    }
+    .btn {
+      width: 100%;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 10px;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    .btn:disabled { background: #4b5563; cursor: not-allowed; }
+    .btn-success { background: #10b981; }
+    #result-box {
+      margin-top: 16px;
+      display: none;
+      text-align: center;
+    }
+    #result-box img {
+      max-width: 100%;
+      max-height: 200px;
+      border-radius: 8px;
+      border: 2px solid #10b981;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="app-card">
+  <!-- 頁籤按鈕 -->
+  <div class="nav-tabs">
+    <button class="tab-btn active" onclick="switchTab('sender')">📤 發送端</button>
+    <button class="tab-btn" onclick="switchTab('receiver')">📥 接收端</button>
+  </div>
+
+  <!-- 頁面 1: 發送端 -->
+  <div id="sender" class="tab-content active">
+    <div class="form-group">
+      <label>1. 選擇檔案 (建議選小圖檔測試)</label>
+      <input type="file" id="fileInput" accept="image/*">
+    </div>
+
+    <div style="display: flex; gap: 10px;">
+      <div class="form-group" style="flex:1;">
+        <label>單包 Bytes (建議 250)</label>
+        <input type="number" id="chunkSize" value="250">
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>張/毫秒 (建議 200ms)</label>
+        <input type="number" id="frameInterval" value="200">
+      </div>
+    </div>
+
+    <button class="btn" id="startTxBtn" onclick="startBroadcasting()" disabled>開始播放動態 QR Code</button>
+
+    <div class="qr-box" id="qrContainer">
+      <span style="color: #6b7280; font-size: 0.85rem;">等待載入檔案...</span>
+    </div>
+
+    <div class="status-text" id="txStatus">狀態：未開始</div>
+  </div>
+
+  <!-- 頁面 2: 接收端 -->
+  <div id="receiver" class="tab-content">
+    <div id="video-container">
+      <video id="video" playsinline></video>
+    </div>
+
+    <div class="progress-bg">
+      <div id="rxProgress" class="progress-fill"></div>
+    </div>
+
+    <div class="status-text" id="rxStatus">狀態：點擊下方按鈕啟動鏡頭</div>
+
+    <button class="btn btn-success" id="startCamBtn" onclick="startScanner()">開啟鏡頭掃描</button>
+
+    <div id="result-box">
+      <h3 style="color: #10b981; font-size: 0.95rem;">圖片還原成功！</h3>
+      <img id="restoredImg" src="" alt="還原結果">
+    </div>
+  </div>
+</div>
+
+<canvas id="hiddenCanvas" hidden></canvas>
+
+<script>
+  /* ================= 頁籤切換邏輯 ================= */
+  function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+    if (tabId === 'sender') {
+      document.querySelectorAll('.tab-btn')[0].classList.add('active');
+      document.getElementById('sender').classList.add('active');
+      stopScanner(); // 切換頁面時自動關閉鏡頭
+    } else {
+      document.querySelectorAll('.tab-btn')[1].classList.add('active');
+      document.getElementById('receiver').classList.add('active');
+      stopBroadcasting(); // 切換頁面時自動停止發送
+    }
+  }
+
+  /* ================= 發送端邏輯 ================= */
+  let chunks = [];
+  let currentFrame = 0;
+  let txTimer = null;
+
+  const fileInput = document.getElementById('fileInput');
+  const startTxBtn = document.getElementById('startTxBtn');
+  const qrContainer = document.getElementById('qrContainer');
+  const txStatus = document.getElementById('txStatus');
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length > 0) startTxBtn.disabled = false;
+  });
+
+  function startBroadcasting() {
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    const chunkSize = parseInt(document.getElementById('chunkSize').value) || 250;
+    const interval = parseInt(document.getElementById('frameInterval').value) || 200;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const base64Data = e.target.result;
+      chunks = splitDataIntoChunks(base64Data, chunkSize);
+      
+      stopBroadcasting();
+      currentFrame = 0;
+
+      txTimer = setInterval(() => {
+        renderFrame(currentFrame);
+        currentFrame = (currentFrame + 1) % chunks.length;
+      }, interval);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function stopBroadcasting() {
+    if (txTimer) clearInterval(txTimer);
+  }
+
+  function splitDataIntoChunks(dataStr, size) {
+    const result = [];
+    const total = Math.ceil(dataStr.length / size);
+    for (let i = 0; i < total; i++) {
+      const segment = dataStr.slice(i * size, (i + 1) * size);
+      result.push(`${i + 1}/${total}|${segment}`);
+    }
+    return result;
+  }
+
+  function renderFrame(index) {
+    const payload = chunks[index];
+    txStatus.innerText = `播放中：${index + 1} / ${chunks.length} 包`;
+    try {
+      const qr = qrcode(0, 'L');
+      qr.addData(payload);
+      qr.make();
+      qrContainer.innerHTML = qr.createImgTag(5, 0);
+    } catch (err) {
+      txStatus.innerText = "切片過大，無法繪製！請降低 Chunk Size。";
+      stopBroadcasting();
+    }
+  }
+
+  /* ================= 接收端邏輯 ================= */
+  const video = document.getElementById('video');
+  const hiddenCanvas = document.getElementById('hiddenCanvas');
+  const ctx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
+  const rxStatus = document.getElementById('rxStatus');
+  const rxProgress = document.getElementById('rxProgress');
+  const resultBox = document.getElementById('result-box');
+  const restoredImg = document.getElementById('restoredImg');
+
+  let receivedChunks = new Map();
+  let totalChunks = 0;
+  let isScanning = false;
+  let animationFrameId = null;
+
+  async function startScanner() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" }
+      });
+      video.srcObject = stream;
+      video.setAttribute("playsinline", true);
+      video.play();
+      
+      document.getElementById('startCamBtn').style.display = 'none';
+      rxStatus.innerText = "狀態：請對準發送端的 QR Code";
+      isScanning = true;
+      receivedChunks.clear();
+      resultBox.style.display = 'none';
+      
+      tick();
+    } catch (err) {
+      rxStatus.innerText = "失敗：開啟鏡頭需 HTTPS 環境或 localhost";
+    }
+  }
+
+  function stopScanner() {
+    isScanning = false;
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    if (video.srcObject) {
+      video.srcObject.getTracks().forEach(track => track.stop());
+      video.srcObject = null;
+    }
+    document.getElementById('startCamBtn').style.display = 'block';
+  }
+
+  function tick() {
+    if (!isScanning) return;
+
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      hiddenCanvas.height = video.videoHeight;
+      hiddenCanvas.width = video.videoWidth;
+      ctx.drawImage(video, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
+      
+      const imageData = ctx.getImageData(0, 0, hiddenCanvas.width, hiddenCanvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: "dontInvert",
+      });
+
+      if (code && code.data) {
+        parseTxqrHeader(code.data);
+      }
+    }
+    animationFrameId = requestAnimationFrame(tick);
+  }
+
+  function parseTxqrHeader(payload) {
+    const pipeIndex = payload.indexOf('|');
+    if (pipeIndex === -1) return;
+
+    const header = payload.substring(0, pipeIndex);
+    const data = payload.substring(pipeIndex + 1);
+    const parts = header.split('/');
+
+    if (parts.length !== 2) return;
+    const currentIdx = parseInt(parts[0], 10);
+    const total = parseInt(parts[1], 10);
+
+    if (isNaN(currentIdx) || isNaN(total)) return;
+
+    totalChunks = total;
+
+    if (!receivedChunks.has(currentIdx)) {
+      receivedChunks.set(currentIdx, data);
+      const percent = Math.floor((receivedChunks.size / totalChunks) * 100);
+      rxProgress.style.width = percent + '%';
+      rxStatus.innerText = `接收進度：${receivedChunks.size} / ${totalChunks} 包 (${percent}%)`;
+
+      if (receivedChunks.size === totalChunks) {
+        completeAssembly();
+      }
+    }
+  }
+
+  function completeAssembly() {
+    stopScanner();
+    rxStatus.innerText = "組裝完成！";
+
+    let fullBase64 = '';
+    for (let i = 1; i <= totalChunks; i++) {
+      fullBase64 += receivedChunks.get(i);
+    }
+
+    restoredImg.src = fullBase64;
+    resultBox.style.display = 'block';
+  }
+</script>
+
+</body>
+</html>
